@@ -1,12 +1,28 @@
 {
-  "name": "Autumn dev container",
-  "image": "mcr.microsoft.com/devcontainers/node:18",
+  "name": "Autumn Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-  "forwardPorts": [8080],
-  // "postCreateCommand": "pnpm install",
-  "postCreateCommand": "apt update && apt install -y zsh",
+  // Backend, Frontend and Redis.
+  "forwardPorts": [8080, 3000, 6379],
+  "postCreateCommand": "sudo apt update && npm i -g bun",
   "settings": {
     "terminal.integrated.shell.linux": "/bin/zsh"
   },
-  "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+  "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"],
+  "features": {
+    // Docker in Docker
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRootDocker": "true"
+    },
+    // pnpm
+    "ghcr.io/devcontainers-extra/features/pnpm:2": {},
+    // zsh
+    "ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {},
+    // Redis
+    "ghcr.io/devcontainers-extra/features/redis-homebrew:1": {}
+  },
+  "remoteEnv": {
+    "NODE_ENV": "development"
+  }
 }
