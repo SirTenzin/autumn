@@ -1,337 +1,396 @@
-import "react-cmdk/dist/cmdk.css";
-import { AppEnv } from "@autumn/shared";
+import type { CustomerSchema } from "@autumn/shared";
 import {
-	BarChart3,
-	Code2,
-	HelpCircle,
-	Home,
-	Layers,
-	List,
-	LogOut,
-	Package,
-	Plus,
-	RefreshCw,
-	Settings,
-	Users,
-} from "lucide-react";
+	ArrowsClockwiseIcon,
+	PackageIcon,
+	StackIcon,
+} from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
+import { AppEnv } from "autumn-js";
+import { CircleUserRoundIcon, GiftIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import CommandPalette, { filterItems, getItemIndex } from "react-cmdk";
 import { useHotkeys } from "react-hotkeys-hook";
-import { useLocation, useNavigate } from "react-router";
-import { toast } from "sonner";
+import { useNavigate } from "react-router";
+import type { z } from "zod";
+import {
+	CommandDialog,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useProductsQuery } from "@/hooks/queries/useProductsQuery";
+import { useAxiosInstance } from "@/services/useAxiosInstance";
 import { useEnv } from "@/utils/envUtils";
 import { navigateTo } from "@/utils/genUtils";
-import { useCusSearchQuery } from "@/views/customers/hooks/useCusSearchQuery";
+import { handleEnvChange } from "@/views/main-sidebar/EnvDropdown";
 
-// Icon mapping object
-const iconMap: Record<string, React.ComponentType> = {
-	HomeIcon: Home,
-	CogIcon: Settings,
-	RectangleStackIcon: Layers,
-	CodeBracketIcon: Code2,
-	LifebuoyIcon: HelpCircle,
-	ArrowRightOnRectangleIcon: LogOut,
-	UsersIcon: Users,
-	PackageIcon: Package,
-	ChartBarIcon: BarChart3,
-	PlusIcon: Plus,
-	ListBulletIcon: List,
-	ArrowPathIcon: RefreshCw,
-};
+type Customer = z.infer<typeof CustomerSchema>;
+
+/**
+ * Calculate Levenshtein distance between two strings
+ */
+function levenshteinDistance(a: string, b: string): number {
+	const matrix: number[][] = [];
+
+	for (let i = 0; i <= b.length; i++) {
+		matrix[i] = [i];
+	}
+
+	for (let j = 0; j <= a.length; j++) {
+		matrix[0][j] = j;
+	}
+
+	for (let i = 1; i <= b.length; i++) {
+		for (let j = 1; j <= a.length; j++) {
+			if (b.charAt(i - 1) === a.charAt(j - 1)) {
+				matrix[i][j] = matrix[i - 1][j - 1];
+			} else {
+				matrix[i][j] = Math.min(
+					matrix[i - 1][j - 1] + 1,
+					matrix[i][j - 1] + 1,
+					matrix[i - 1][j] + 1,
+				);
+			}
+		}
+	}
+
+	return matrix[b.length][a.length];
+}
+
+/**
+ * Calculate relevance score for a search term against text
+ * Lower score = better match
+ */
+function calculateRelevanceScore(searchTerm: string, text: string): number {
+	const lowerSearch = searchTerm.toLowerCase();
+	const lowerText = text.toLowerCase();
+
+	// Exact match = best score
+	if (lowerText === lowerSearch) return 0;
+
+	// Starts with search term = very good score
+	if (lowerText.startsWith(lowerSearch)) return 1;
+
+	// Contains search term = good score
+	const indexOfSearch = lowerText.indexOf(lowerSearch);
+	if (indexOfSearch !== -1) {
+		// Earlier in string = better score
+		return 2 + indexOfSearch / 100;
+	}
+
+	// Use Levenshtein distance for fuzzy matching
+	// Add 100 to differentiate from substring matches
+	return 100 + levenshteinDistance(lowerSearch, lowerText);
+}
 
 const CommandPaletteComponent = () => {
-	const [page, setPage] = useState<
-		"root" | "projects" | "customers" | "products"
-	>("root");
 	const [open, setOpen] = useState<boolean>(false);
 	const [search, setSearch] = useState("");
-	const [customerSearch, setCustomerSearch] = useState("");
-	const [productSearch, setProductSearch] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
 
 	const navigate = useNavigate();
-	const location = useLocation();
 	const env = useEnv();
+	const axiosInstance = useAxiosInstance();
 
-	// Query hooks
-	const { customers, isLoading: customersLoading } = useCusSearchQuery();
+	const getMetaKey = () => {
+		if (navigator.userAgent.includes("Mac")) {
+			return "⌘";
+		}
+		return "Ctrl";
+	};
+
+	const keystrokeContainer = (keyStroke: string) => {
+		const isSingleChar = keyStroke.length === 1;
+		const sizeClasses = isSingleChar ? "w-4" : "px-1";
+		const baseClasses = `flex items-center justify-center ${sizeClasses} h-4 rounded-md text-tiny font-medium`;
+		const variantClasses = "bg-purple-medium !text-primary-foreground";
+
+		return (
+			<div className={`${baseClasses} ${variantClasses}`}>
+				<span>{keyStroke}</span>
+			</div>
+		);
+	};
+
 	const { products, isLoading: productsLoading } = useProductsQuery();
+
+	// Debounce search for backend query
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(search);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [search]);
+
+	// Search customers from backend with debounced search term
+	const { data: searchedCustomersData, isLoading: searchCustomersLoading } =
+		useQuery<{
+			customers: Customer[];
+		}>({
+			queryKey: ["command-palette-customers-search", debouncedSearch],
+			queryFn: async () => {
+				// Always use the search term in the backend query
+				const { data } = await axiosInstance.post(`/customers/all/search`, {
+					search: debouncedSearch,
+					filters: {},
+					page: 1,
+					page_size: 50,
+				});
+				return { customers: data.customers };
+			},
+			enabled: open && debouncedSearch.length > 0,
+		});
 
 	useHotkeys("meta+k", () => {
 		setOpen(true);
 	});
 
-	// Reset page when closing
 	useEffect(() => {
 		if (!open) {
-			setPage("root");
 			setSearch("");
-			setCustomerSearch("");
-			setProductSearch("");
+			setDebouncedSearch("");
 		}
 	}, [open]);
 
-	// Filter items for main page
-	const rootItems = useMemo(
-		() => [
-			{
-				heading: "Navigation",
-				id: "navigation",
-				items: [
-					{
-						id: "go-analytics",
-						children: "Go to Analytics",
-						icon: "ChartBarIcon",
-						onClick: () => {
-							navigateTo("/analytics", navigate, env);
-							setOpen(false);
-						},
-					},
-					{
-						id: "go-products",
-						children: "Go to Products",
-						icon: "PackageIcon",
-						onClick: () => {
-							navigateTo("/products", navigate, env);
-							setOpen(false);
-						},
-					},
-					{
-						id: "go-customers",
-						children: "Go to Customers",
-						icon: "UsersIcon",
-						onClick: () => {
-							navigateTo("/customers", navigate, env);
-							setOpen(false);
-						},
-					},
-				],
+	const showResults = search.length > 0;
+	const rawCustomers = searchedCustomersData?.customers || [];
+
+	// Combine and sort all results by relevance
+	const sortedResults = useMemo(() => {
+		if (!search) return [];
+
+		const customerResults = rawCustomers.map((customer) => {
+			const nameScore = calculateRelevanceScore(search, customer.name || "");
+			const emailScore = calculateRelevanceScore(search, customer.email || "");
+			const idScore = calculateRelevanceScore(search, customer.id || "");
+			const internalIdScore = calculateRelevanceScore(
+				search,
+				customer.internal_id || "",
+			);
+			const score = Math.min(nameScore, emailScore, idScore, internalIdScore);
+			return { type: "customer" as const, data: customer, score };
+		});
+
+		const lowerSearch = search.toLowerCase();
+		const productResults = products
+			.filter((product) => {
+				const name = product.name?.toLowerCase() || "";
+				const id = product.id?.toLowerCase() || "";
+				return name.includes(lowerSearch) || id.includes(lowerSearch);
+			})
+			.map((product) => {
+				const nameScore = calculateRelevanceScore(search, product.name || "");
+				const idScore = calculateRelevanceScore(search, product.id || "");
+				const score = Math.min(nameScore, idScore);
+				return { type: "product" as const, data: product, score };
+			});
+
+		// Combine and sort all results together
+		return [...customerResults, ...productResults]
+			.sort((a, b) => a.score - b.score)
+			.slice(0, 15);
+	}, [rawCustomers, products, search]);
+
+	// Show loading if:
+	// 1. Products are loading, OR
+	// 2. User is typing and we're waiting for debounce, OR
+	// 3. Query is actively loading
+	const isWaitingForDebounce = search !== debouncedSearch;
+	const isLoading =
+		productsLoading || searchCustomersLoading || isWaitingForDebounce;
+
+	const navigationItems = [
+		{
+			label: "Go to Products",
+			icon: <PackageIcon className="mr-2 size-3.5" />,
+			onSelect: () => {
+				navigateTo("/products", navigate, env);
+				setOpen(false);
 			},
-			{
-				heading: "Customers",
-				id: "customers",
-				items: [
-					{
-						id: "list-customers",
-						children: "List Customers",
-						icon: "ListBulletIcon",
-						closeOnSelect: false,
-						onClick: () => {
-							setPage("customers");
-						},
-					},
-					{
-						id: "customer-analytics",
-						children: "Customer Analytics",
-						icon: "ChartBarIcon",
-						onClick: () => {
-							const pathMatch = location.pathname.match(/\/customers\/([^/]+)/);
-							if (pathMatch) {
-								navigateTo(
-									`/customers/${pathMatch[1]}/analytics`,
-									navigate,
-									env,
-								);
-							} else {
-								toast.error("Please navigate to a customer first");
-							}
-							setOpen(false);
-						},
-					},
-				],
+		},
+		{
+			label: "Go to Features",
+			icon: <StackIcon className="mr-2 size-3.5" />,
+			onSelect: () => {
+				navigateTo("/products?tab=features", navigate, env);
+				setOpen(false);
 			},
-			{
-				heading: "Products",
-				id: "products",
-				items: [
-					{
-						id: "list-products",
-						children: "List Products",
-						icon: "ListBulletIcon",
-						closeOnSelect: false,
-						onClick: () => {
-							setPage("products");
-						},
-					},
-					{
-						id: "create-product",
-						children: "Create Product",
-						icon: "PlusIcon",
-						onClick: () => {
-							navigateTo("/products", navigate, env);
-							setOpen(false);
-							// The products page will handle showing the create dialog
-							setTimeout(() => {
-								toast.info(
-									"Navigate to Products page and click 'Add Product' button",
-								);
-							}, 500);
-						},
-					},
-				],
+		},
+		{
+			label: "Go to Rewards",
+			icon: <GiftIcon className="mr-2 size-3.5" />,
+			onSelect: () => {
+				navigateTo("/products?tab=rewards", navigate, env);
+				setOpen(false);
 			},
-			{
-				heading: "Settings",
-				id: "settings",
-				items: [
-					{
-						id: "switch-env",
-						children: `Switch to ${
-							env === AppEnv.Live ? "Sandbox" : "Live"
-						} Environment`,
-						icon: "ArrowPathIcon",
-						onClick: () => {
-							const newEnv = env === AppEnv.Live ? AppEnv.Sandbox : AppEnv.Live;
-							const currentPath = location.pathname.replace("/sandbox", "");
-							if (newEnv === AppEnv.Sandbox) {
-								navigate(`/sandbox${currentPath}`);
-							} else {
-								navigate(currentPath);
-							}
-							setOpen(false);
-							toast.success(`Switched to ${newEnv} environment`);
-						},
-					},
-				],
+		},
+		{
+			label: `Go to ${env === AppEnv.Sandbox ? "Production" : "Sandbox"}`,
+			icon: <ArrowsClockwiseIcon className="mr-2 size-3.5" />,
+			onSelect: () => {
+				handleEnvChange(
+					env === AppEnv.Sandbox ? AppEnv.Live : AppEnv.Sandbox,
+					true,
+				);
+				setOpen(false);
 			},
-		],
-		[env, location.pathname, navigate],
+		},
+	];
+
+	useHotkeys(
+		"meta+1",
+		() => {
+			if (navigationItems[0]) {
+				navigationItems[0].onSelect();
+			}
+		},
+		{ enableOnFormTags: true, preventDefault: true },
 	);
 
-	const filteredItems = filterItems(rootItems, search);
+	useHotkeys(
+		"meta+2",
+		() => {
+			if (navigationItems[1]) {
+				navigationItems[1].onSelect();
+			}
+		},
+		{ enableOnFormTags: true, preventDefault: true },
+	);
 
-	// Filter customers for customer page
-	const filteredCustomers = useMemo(() => {
-		if (!customers) return [];
-		return customers.filter((customer) =>
-			customer.name?.toLowerCase().includes(customerSearch.toLowerCase()),
-		);
-	}, [customers, customerSearch]);
+	useHotkeys(
+		"meta+3",
+		() => {
+			if (navigationItems[2]) {
+				navigationItems[2].onSelect();
+			}
+		},
+		{ enableOnFormTags: true, preventDefault: true },
+	);
 
-	// Filter products for product page
-	const filteredProducts = useMemo(() => {
-		if (!products) return [];
-		return products.filter((product) =>
-			product.name?.toLowerCase().includes(productSearch.toLowerCase()),
-		);
-	}, [products, productSearch]);
+	useHotkeys(
+		"meta+4",
+		() => {
+			if (navigationItems[3]) {
+				navigationItems[3].onSelect();
+			}
+		},
+		{ enableOnFormTags: true, preventDefault: true },
+	);
 
 	return (
-		<CommandPalette
-			onChangeSearch={(value) => {
-				if (page === "root") setSearch(value);
-				else if (page === "customers") setCustomerSearch(value);
-				else if (page === "products") setProductSearch(value);
-			}}
-			onChangeOpen={setOpen}
-			search={
-				page === "root"
-					? search
-					: page === "customers"
-						? customerSearch
-						: productSearch
-			}
-			isOpen={open}
-			page={page}
-		>
-			{/* Main Page */}
-			{/* biome-ignore lint/correctness/useUniqueElementIds: react-cmdk requires static page IDs */}
-			<CommandPalette.Page id="root">
-				{filteredItems.length ? (
-					filteredItems.map((list) => (
-						<CommandPalette.List key={list.id} heading={list.heading}>
-							{list.items.map(({ id, icon, ...rest }) => (
-								<CommandPalette.ListItem
-									key={id}
-									index={getItemIndex(filteredItems, id)}
-									icon={iconMap[icon]}
-									{...rest}
-								/>
-							))}
-						</CommandPalette.List>
-					))
-				) : (
-					<CommandPalette.FreeSearchAction />
+		<CommandDialog open={open} onOpenChange={setOpen}>
+			<CommandInput
+				placeholder="Search customers and products..."
+				value={search}
+				onValueChange={setSearch}
+			/>
+			<CommandList>
+				{!showResults && (
+					<CommandGroup heading="Navigation" className="text-body-secondary">
+						{navigationItems.map((item, index) => (
+							<CommandItem
+								key={item.label}
+								onSelect={item.onSelect}
+								className="text-body flex justify-between items-center"
+							>
+								<div className="flex items-center">
+									{item.icon}
+									{item.label}
+								</div>
+								{index < 4 && (
+									<span className="flex items-center gap-0.5">
+										{keystrokeContainer(getMetaKey())}
+										{keystrokeContainer((index + 1).toString())}
+									</span>
+								)}
+							</CommandItem>
+						))}
+					</CommandGroup>
 				)}
-			</CommandPalette.Page>
 
-			{/* Customers List Page */}
-			{/* biome-ignore lint/correctness/useUniqueElementIds: react-cmdk requires static page IDs */}
-			<CommandPalette.Page
-				id="customers"
-				onEscape={() => {
-					setPage("root");
-					setCustomerSearch("");
-				}}
-			>
-				<CommandPalette.List heading="Customers">
-					{customersLoading ? (
-						<CommandPalette.ListItem index={0} icon={RefreshCw}>
-							Loading customers...
-						</CommandPalette.ListItem>
-					) : filteredCustomers.length > 0 ? (
-						filteredCustomers.slice(0, 10).map((customer, index) => (
-							<CommandPalette.ListItem
-								key={customer.internal_id}
-								index={index}
-								icon={Users}
-								onClick={() => {
-									navigateTo(
-										`/customers/${customer.internal_id}`,
-										navigate,
-										env,
+				{showResults && (
+					<>
+						{sortedResults.length > 0 && (
+							<CommandGroup heading="Results">
+								{sortedResults.map((result) => {
+									if (result.type === "customer") {
+										const customer = result.data;
+										const displayName =
+											customer.name ||
+											customer.email ||
+											customer.id ||
+											customer.internal_id;
+										return (
+											<CommandItem
+												key={`customer-${customer.internal_id}`}
+												onSelect={() => {
+													navigateTo(
+														`/customers/${customer.internal_id}`,
+														navigate,
+														env,
+													);
+													setOpen(false);
+												}}
+											>
+												<CircleUserRoundIcon className="mr-2" size={14} />
+												<div className="flex items-center gap-2">
+													<span>{displayName}</span>
+													{customer.email && customer.name && (
+														<span className="text-xs text-muted-foreground">
+															{customer.email}
+														</span>
+													)}
+												</div>
+											</CommandItem>
+										);
+									}
+
+									const product = result.data;
+									return (
+										<CommandItem
+											key={`product-${product.id}`}
+											onSelect={() => {
+												navigateTo(`/products/${product.id}`, navigate, env);
+												setOpen(false);
+											}}
+										>
+											<PackageIcon className="mr-2" size={14} />
+											<span>
+												{product.name}
+												{product.is_add_on && " (Add-on)"}
+											</span>
+										</CommandItem>
 									);
-									setOpen(false);
-								}}
-							>
-								{customer.name || customer.email || customer.internal_id}
-							</CommandPalette.ListItem>
-						))
-					) : (
-						<CommandPalette.ListItem index={0} icon={Users}>
-							No customers found
-						</CommandPalette.ListItem>
-					)}
-				</CommandPalette.List>
-			</CommandPalette.Page>
+								})}
+							</CommandGroup>
+						)}
 
-			{/* Products List Page */}
-			{/* biome-ignore lint/correctness/useUniqueElementIds: react-cmdk requires static page IDs */}
-			<CommandPalette.Page
-				id="products"
-				onEscape={() => {
-					setPage("root");
-					setProductSearch("");
-				}}
-			>
-				<CommandPalette.List heading="Products">
-					{productsLoading ? (
-						<CommandPalette.ListItem index={0} icon={RefreshCw}>
-							Loading products...
-						</CommandPalette.ListItem>
-					) : filteredProducts.length > 0 ? (
-						filteredProducts.slice(0, 10).map((product, index) => (
-							<CommandPalette.ListItem
-								key={product.id}
-								index={index}
-								icon={Package}
-								onClick={() => {
-									navigateTo(`/products/${product.id}`, navigate, env);
-									setOpen(false);
-								}}
-							>
-								{product.name}
-								{product.is_add_on && " (Add-on)"}
-							</CommandPalette.ListItem>
-						))
-					) : (
-						<CommandPalette.ListItem index={0} icon={Package}>
-							No products found
-						</CommandPalette.ListItem>
-					)}
-				</CommandPalette.List>
-			</CommandPalette.Page>
-		</CommandPalette>
+						{isLoading && sortedResults.length === 0 && (
+							<div className="py-2 px-4">
+								{[...Array(2)].map((_, i) => (
+									<div key={i} className="flex items-center gap-3 py-2">
+										{/* Avatar/Icon skeleton */}
+										<div className="shrink-0">
+											<Skeleton className="h-5 w-5 rounded-full" />
+										</div>
+										{/* Main block */}
+										<div className="flex flex-col gap-1 w-full">
+											<Skeleton className="h-4 w-3/5" />
+										</div>
+									</div>
+								))}
+							</div>
+						)}
+
+						{!isLoading && sortedResults.length === 0 && (
+							<CommandEmpty>No results found.</CommandEmpty>
+						)}
+					</>
+				)}
+			</CommandList>
+		</CommandDialog>
 	);
 };
 
