@@ -81,6 +81,7 @@
 		"hono-rate-limiter": "^0.4.2",
 		"http-status-codes": "^2.3.0",
 		"ioredis": "^5.5.0",
+		"jose": "^6.1.0",
 		"ksuid": "^3.0.0",
 		"lodash-es": "^4.17.21",
 		"loops": "^5.0.1",
