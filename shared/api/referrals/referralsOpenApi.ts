@@ -1,3 +1,4 @@
+import type { ZodOpenApiPathsObject } from "zod-openapi";
 import {
 	CreateReferralCodeResponseSchema,
 	RedeemReferralCodeResponseSchema,
@@ -12,12 +13,13 @@ const ReferralCodeSchema = CreateReferralCodeResponseSchema.meta({
 	description: "Referral code object returned by the API",
 });
 
-const RedeemReferralCodeResponseSchemaWithMeta = RedeemReferralCodeResponseSchema.meta({
-	id: "RedeemReferralCodeResponse",
-	description: "Redemption response object returned by the API",
-});
+const RedeemReferralCodeResponseSchemaWithMeta =
+	RedeemReferralCodeResponseSchema.meta({
+		id: "RedeemReferralCodeResponse",
+		description: "Redemption response object returned by the API",
+	});
 
-export const referralOps = {
+export const referralOps: ZodOpenApiPathsObject = {
 	"/referrals/code": {
 		post: {
 			summary: "Create a referral code",

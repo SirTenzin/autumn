@@ -62,7 +62,7 @@ describe(`${chalk.yellowBright("mergedTrial5: Testing cancel at end of cycle and
 	let org: Organization;
 	let env: AppEnv;
 
-	before(async function () {
+	beforeAll(async function () {
 		await setupBefore(this);
 		const { autumnJs } = this;
 		db = this.db;
@@ -115,7 +115,7 @@ describe(`${chalk.yellowBright("mergedTrial5: Testing cancel at end of cycle and
 		},
 	];
 
-	it("should attach pro trial for entity 1 and entity 2", async () => {
+	it("should attach pro trial for 3 entities", async () => {
 		await autumn.entities.create(customerId, entities);
 
 		for (const op of ops) {

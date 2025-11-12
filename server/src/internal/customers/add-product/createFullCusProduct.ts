@@ -351,10 +351,12 @@ export const createFullCusProduct = async ({
 	}
 
 	const cusProdId = generateId("cus_prod");
-	logger.info(
-		`Inserting cus product ${product.id} for ${customer.name}, cus product ID: ${cusProdId}`,
-	);
-	logger.info(productOptions);
+	logger.info(`Inserting cus product ${product.id} for ${customer.name}`, {
+		data: {
+			cusProductId: cusProdId,
+			productOptions: productOptions || undefined,
+		},
+	});
 
 	// 1. create customer entitlements
 	const cusEnts: CustomerEntitlement[] = [];
@@ -402,6 +404,7 @@ export const createFullCusProduct = async ({
 		isDowngrade,
 		entities: attachParams.entities,
 		features: attachParams.features,
+		prices,
 	});
 
 	// 4. Get new rollovers

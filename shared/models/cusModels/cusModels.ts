@@ -67,19 +67,19 @@ export const CreateCustomerSchema = z.object({
 	processors: z.object<ExternalProcessors>().nullish(),
 });
 
-export const CustomerDataSchema = z.object({
-	name: z.string().nullish(),
-	email: z.string().nullish(),
-	fingerprint: z.string().nullish(),
-	metadata: z.record(z.any(), z.any()).nullish(),
-	stripe_id: z.string().nullish(),
-});
+// export const CustomerDataSchema = z.object({
+// 	name: z.string().nullish(),
+// 	email: z.string().nullish(),
+// 	fingerprint: z.string().nullish(),
+// 	metadata: z.record(z.any(), z.any()).nullish(),
+// 	stripe_id: z.string().nullish(),
+// });
 
 export const CustomerResponseSchema = CustomerSchema.omit({
 	org_id: true,
 });
 
 export type Customer = z.infer<typeof CustomerSchema>;
-export type CustomerData = z.infer<typeof CustomerDataSchema>;
+// export type CustomerData = z.infer<typeof CustomerDataSchema>;
 export type CustomerResponse = z.infer<typeof CustomerResponseSchema>;
 export type CreateCustomer = z.infer<typeof CreateCustomerSchema>;
